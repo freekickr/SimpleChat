@@ -58,28 +58,48 @@ public class ServerWorker extends Thread {
                 String cmd = tokens[0].trim().toLowerCase();
                 switch (cmd) {
                     default:
+                    if (this.isLoggedIn)
                         handleCommonMessage(line);
-                        break;
+                    else
+                        this.send(MsgTypes.SYSTEM, "ERROR! You need to log in first!");
+                    break;
                     case "login":
                         handleLogin(tokens);
                         break;
                     case "msg":
-                        handleSpecialMessage(tokens);
+                        if (this.isLoggedIn)
+                            handleSpecialMessage(tokens);
+                        else
+                            this.send(MsgTypes.SYSTEM, "ERROR! You need to log in first!");
                         break;
                     case "#topics":
                         handleGetTopicsList();
                         break;
                     case "#newtopic":
-                        handleNewTopic(tokens);
+                        if (this.isLoggedIn)
+                            handleNewTopic(tokens);
+                        else
+                            this.send(MsgTypes.SYSTEM, "ERROR! You need to log in first!");
                         break;
                     case "#join":
-                        handleJoinTopic(tokens);
+                        if (this.isLoggedIn)
+                            handleJoinTopic(tokens);
+                        else
+                            this.send(MsgTypes.SYSTEM, "ERROR! You need to log in first!");
                         break;
                     case "#leave":
-                        handleLeaveTopic(tokens);
+                        if (this.isLoggedIn)
+                            handleLeaveTopic(tokens);
+                        else
+                            this.send(MsgTypes.SYSTEM, "ERROR! You need to log in first!");
                         break;
                     case "logout":
-                        handleLogout();
+                        System.out.println(1);
+                        if (this.isLoggedIn)
+                            handleLogout();
+                        else {
+                            this.send(MsgTypes.SYSTEM, "ERROR! You are not logged in!");
+                        }
                         break;
                     case "quit":
                         handleLogout();
@@ -88,6 +108,41 @@ public class ServerWorker extends Thread {
             }
         }
         clientSocket.close();
+    }
+
+    private void handleLogin(String[] tokens) throws IOException {
+        if (tokens.length == 3) {
+            String login = tokens[1].trim();
+            String password = tokens[2].trim();
+
+            //refactor with users data ?db?
+            if (login.equalsIgnoreCase("guest") && password.equalsIgnoreCase("guest")
+                    || login.equalsIgnoreCase("alex") && password.equalsIgnoreCase("123")
+                    || login.equalsIgnoreCase("guest2") && password.equalsIgnoreCase("123")) {
+                String msg = SYS_LINE_PREFIX + "successful login" + System.lineSeparator();
+                outputStream.write(msg.getBytes());
+                this.login = login;
+                System.out.println(login + " has logged in!");
+
+                //send current user list of all online users
+                //send all users current user's login message
+
+                this.send(MsgTypes.SYSTEM, "Online users: " + server.getCurrentUsers());
+                for (ServerWorker worker : server.getWorkersList()) {
+                    if (worker.getLogin() != null)
+                        if (!login.equalsIgnoreCase(worker.getLogin())) {
+                            this.send(MsgTypes.LIST, worker.getLogin());
+                            worker.send(MsgTypes.SYSTEM, login + " goes online");
+                        }
+                }
+            } else {
+                this.send(MsgTypes.SYSTEM, "Login error");
+            }
+            server.setCurrentUsers(server.getCurrentUsers() + 1);
+            this.isLoggedIn = true;
+        } else {
+            this.send(MsgTypes.SYSTEM, "ERROR! Not a valid username/password");
+        }
     }
 
     private void handleGetTopicsList() throws IOException {
@@ -152,42 +207,6 @@ public class ServerWorker extends Thread {
         }
     }
 
-    private void handleLogin(String[] tokens) throws IOException {
-        if (tokens.length == 3) {
-            String login = tokens[1].trim();
-            String password = tokens[2].trim();
-
-            //refactor with users data ?db?
-            if (login.equalsIgnoreCase("guest") && password.equalsIgnoreCase("guest")
-                    || login.equalsIgnoreCase("alex") && password.equalsIgnoreCase("123")
-                    || login.equalsIgnoreCase("guest2") && password.equalsIgnoreCase("123")) {
-                String msg = SYS_LINE_PREFIX + "successful login" + System.lineSeparator();
-                outputStream.write(msg.getBytes());
-                this.login = login;
-                System.out.println(login + " has logged in!");
-
-                ArrayList<ServerWorker> workersList = server.getWorkersList();
-                //send current user list of all online users
-                //send all users current user's login message
-                int onlineUsers = 0;
-                for (ServerWorker worker : workersList)
-                    if (worker.isLoggedIn())
-                        onlineUsers++;
-                this.send(MsgTypes.SYSTEM, "Online users: " + onlineUsers);
-
-                for (ServerWorker worker : workersList) {
-                    if (worker.getLogin() != null)
-                        if (!login.equalsIgnoreCase(worker.getLogin())) {
-                            this.send(MsgTypes.LIST, worker.getLogin());
-                            worker.send(MsgTypes.SYSTEM, login + " goes online");
-                        }
-                }
-            } else {
-                this.send(MsgTypes.SYSTEM, "Login error");
-            }
-            this.isLoggedIn = true;
-        }
-    }
 
     private void handleLogout() throws IOException {
         server.getWorkersList().remove(this);
@@ -195,19 +214,16 @@ public class ServerWorker extends Thread {
         for (ServerWorker worker : server.getWorkersList()) {
             worker.send(MsgTypes.SYSTEM, this.login + " went offline");
         }
+        server.setCurrentUsers(server.getCurrentUsers() - 1);
         this.isLoggedIn = false;
         clientSocket.close();
     }
 
     private void handleCommonMessage(String msg) throws IOException {
         System.out.println("check");
-        if (this.isLoggedIn) {
-            for (ServerWorker worker : server.getWorkersList())
-                if (worker.isLoggedIn())
-                    worker.send(MsgTypes.COMMON, this.login + ": " + msg);
-        } else {
-            this.send(MsgTypes.SYSTEM, "ERROR! You need to log in first!");
-        }
+        for (ServerWorker worker : server.getWorkersList())
+            if (worker.isLoggedIn())
+                worker.send(MsgTypes.COMMON, this.login + ": " + msg);
     }
 
     private void handleSpecialMessage(String[] tokens) throws IOException {
@@ -216,7 +232,7 @@ public class ServerWorker extends Thread {
 
             StringBuilder messageBuilder = new StringBuilder();
             for (int i = 2; i < tokens.length; i++)
-                messageBuilder.append(tokens[i] + " ");
+                messageBuilder.append(tokens[i]).append(" ");
 
             String convertedMessage = messageBuilder.toString().trim();
             boolean isTopic = modifier.trim().charAt(0) == '#';

@@ -7,6 +7,7 @@ import java.util.ArrayList;
 
 public class Server extends Thread {
     private final int serverPort;
+    private int currentUsers;
     private final String welcomeMsg = "Welcome to ChatServer!" + System.lineSeparator() + "Basic commands: " + System.lineSeparator()
             + "\t login <username> <password> \t(logging in)" + System.lineSeparator()
             + "\t msg <username> <message> \t(direct messages)" + System.lineSeparator()
@@ -15,7 +16,8 @@ public class Server extends Thread {
             + "\t #newtopic <topicname> \t\t(create a new topic, without #)" + System.lineSeparator()
             + "\t #join <topicname> \t\t(join to topic, with #)" + System.lineSeparator()
             + "\t #leave <topicname> \t\t(leave this topic, with #)" + System.lineSeparator()
-            + "\t logout/quit" + System.lineSeparator() + System.lineSeparator();
+            + "\t logout" + System.lineSeparator()
+            + "\t quit" + System.lineSeparator() + System.lineSeparator();
 
 
     private ArrayList<ServerWorker> workersList = new ArrayList<>();
@@ -31,6 +33,14 @@ public class Server extends Thread {
 
     public ArrayList<String> getTopicsList() {
         return topicsList;
+    }
+
+    public int getCurrentUsers() {
+        return currentUsers;
+    }
+
+    public void setCurrentUsers(int currentUsers) {
+        this.currentUsers = currentUsers;
     }
 
     @Override
