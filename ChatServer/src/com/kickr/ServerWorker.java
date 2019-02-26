@@ -5,13 +5,20 @@ import org.apache.commons.lang3.StringUtils;
 import java.io.*;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 
 public class ServerWorker extends Thread {
+    private static final String MSG_LINE_PREFIX = "- ";
+    private static final String SYS_LINE_PREFIX = "<=> ";
+    private static final String LIST_LINE_PREFIX = " - ";
+
     private final Socket clientSocket;
     private final Server server;
+    private OutputStream outputStream;
 
     private String login;
-    private OutputStream outputStream;
+    private boolean isLoggedIn = false;
+    private LinkedHashSet<String> userTopics = new LinkedHashSet<>();
 
     public ServerWorker(Server server, Socket clientSocket) {
         this.server = server;
@@ -20,6 +27,14 @@ public class ServerWorker extends Thread {
 
     public String getLogin() {
         return login;
+    }
+
+    public boolean isLoggedIn() {
+        return isLoggedIn;
+    }
+
+    public boolean isMemberOfTopic(String topicName) {
+        return userTopics.contains(topicName);
     }
 
     @Override
@@ -33,84 +48,213 @@ public class ServerWorker extends Thread {
 
     private void handleClientSocket() throws IOException {
         InputStream inputStream = clientSocket.getInputStream();
-        this.outputStream = clientSocket.getOutputStream();
+        outputStream = clientSocket.getOutputStream();
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
         String line;
-        while ( (line = reader.readLine()) != null ) {
-            String[] tokens = StringUtils.split(line);
+        while (!clientSocket.isClosed() && (line = reader.readLine()) != null) {
+            String[] tokens = StringUtils.split(line, " ");
             if (tokens != null && tokens.length > 0) {
-                String cmd = tokens[0];
-                if ("quit".equalsIgnoreCase(cmd) || "logoff".equalsIgnoreCase(cmd)) {
-                    handleLogoff();
-                    break;
-                } else if ("login".equalsIgnoreCase(cmd)) {
-                    handleLogin(outputStream, tokens);
-                } else if("msg".equalsIgnoreCase(cmd)) {
-                    handleDirectMessage(tokens);
-                } else {
-                    String msg = "unknown cmd: " + cmd + System.lineSeparator();
-                    outputStream.write(msg.getBytes());
+                String cmd = tokens[0].trim().toLowerCase();
+                switch (cmd) {
+                    default:
+                        handleCommonMessage(line);
+                        break;
+                    case "login":
+                        handleLogin(tokens);
+                        break;
+                    case "msg":
+                        handleSpecialMessage(tokens);
+                        break;
+                    case "#topics":
+                        handleGetTopicsList();
+                        break;
+                    case "#newtopic":
+                        handleNewTopic(tokens);
+                        break;
+                    case "#join":
+                        handleJoinTopic(tokens);
+                        break;
+                    case "#leave":
+                        handleLeaveTopic(tokens);
+                        break;
+                    case "logout":
+                        handleLogout();
+                        break;
+                    case "quit":
+                        handleLogout();
+                        break;
                 }
             }
         }
         clientSocket.close();
     }
 
-    private void handleDirectMessage(String[] tokens) {
-        
+    private void handleGetTopicsList() throws IOException {
+        if (!server.getTopicsList().isEmpty())
+            for (String topic : server.getTopicsList())
+                this.send(MsgTypes.LIST, topic);
+        else
+            this.send(MsgTypes.SYSTEM, "There are no topics on the server");
     }
 
+    private void handleNewTopic(String[] tokens) throws IOException {
+        if (tokens.length > 1) {
+            StringBuilder topicNameBuilder = new StringBuilder();
+            topicNameBuilder.append("#");
+            for (int i = 1; i < tokens.length; i++)
+                topicNameBuilder.append(tokens[i]).append(" ");
+            String convertedTopicName = topicNameBuilder.toString().trim().replaceAll(" ", "_");
+            if (server.getTopicsList().contains(convertedTopicName))
+                this.send(MsgTypes.SYSTEM, "This topic is already exists");
+            else {
+                server.getTopicsList().add(convertedTopicName);
+                this.send(MsgTypes.SYSTEM, "Topic " + convertedTopicName + " was successfully created");
+            }
+        } else {
+            this.send(MsgTypes.SYSTEM, "Error! Please write a topic name");
+        }
+    }
 
-    private void handleLogin(OutputStream outputStream, String[] tokens) throws IOException {
+    private void handleJoinTopic(String[] tokens) throws IOException {
+        if (tokens.length == 2) {
+            String topicName = tokens[1];
+            if (server.getTopicsList().contains(topicName)) {
+                if (!this.isMemberOfTopic(topicName)) {
+                    userTopics.add(topicName);
+                    this.send(MsgTypes.SYSTEM, "You have successfully join to " + topicName);
+                } else
+                    this.send(MsgTypes.SYSTEM, "You have already joined to " + topicName);
+
+            } else {
+                this.send(MsgTypes.SYSTEM, "There is no topic \"" + topicName + "\" on this server");
+            }
+        } else {
+            this.send(MsgTypes.SYSTEM, "ERROR! Please enter valid topic name");
+        }
+    }
+
+    private void handleLeaveTopic(String[] tokens) throws IOException {
+        if (tokens.length == 2) {
+            String topicName = tokens[1];
+            if (server.getTopicsList().contains(topicName)) {
+                if (userTopics.contains(topicName)) {
+                    userTopics.remove(topicName);
+                    this.send(MsgTypes.SYSTEM, "You have successfully leave from " + topicName);
+                } else {
+                    this.send(MsgTypes.SYSTEM, "You do not participate this topic");
+                }
+            } else {
+                this.send(MsgTypes.SYSTEM, "There is no topic \"" + topicName + "\" on this server");
+            }
+        } else {
+            this.send(MsgTypes.SYSTEM, "ERROR! Please enter valid topic name");
+        }
+    }
+
+    private void handleLogin(String[] tokens) throws IOException {
         if (tokens.length == 3) {
-            String login = tokens[1];
-            String password = tokens[2];
+            String login = tokens[1].trim();
+            String password = tokens[2].trim();
 
-            if (login.equalsIgnoreCase("guest") && password.equalsIgnoreCase("guest") || login.equalsIgnoreCase("alex") && password.equalsIgnoreCase("123") || login.equalsIgnoreCase("guest2") && password.equalsIgnoreCase("123")) {
-                String msg = "successful login" + System.lineSeparator();
+            //refactor with users data ?db?
+            if (login.equalsIgnoreCase("guest") && password.equalsIgnoreCase("guest")
+                    || login.equalsIgnoreCase("alex") && password.equalsIgnoreCase("123")
+                    || login.equalsIgnoreCase("guest2") && password.equalsIgnoreCase("123")) {
+                String msg = SYS_LINE_PREFIX + "successful login" + System.lineSeparator();
                 outputStream.write(msg.getBytes());
                 this.login = login;
                 System.out.println(login + " has logged in!");
 
                 ArrayList<ServerWorker> workersList = server.getWorkersList();
-
                 //send current user list of all online users
-                for (ServerWorker worker : workersList) {
-                    if (worker.getLogin() != null) {
-                        if (!login.equalsIgnoreCase(worker.getLogin())) {
-                            String alreadyOnlMsg = worker.getLogin() + " is already online" + System.lineSeparator();
-                            send(alreadyOnlMsg);
-                        }
-                    }
-                }
-
-                String onlineMsg = login + " is now online" + System.lineSeparator();
                 //send all users current user's login message
+                int onlineUsers = 0;
+                for (ServerWorker worker : workersList)
+                    if (worker.isLoggedIn())
+                        onlineUsers++;
+                this.send(MsgTypes.SYSTEM, "Online users: " + onlineUsers);
+
                 for (ServerWorker worker : workersList) {
-                    if (!login.equalsIgnoreCase(worker.getLogin())) {
-                        worker.send(onlineMsg);
-                    }
+                    if (worker.getLogin() != null)
+                        if (!login.equalsIgnoreCase(worker.getLogin())) {
+                            this.send(MsgTypes.LIST, worker.getLogin());
+                            worker.send(MsgTypes.SYSTEM, login + " goes online");
+                        }
                 }
             } else {
-                String msg = "error login" + System.lineSeparator();
-                outputStream.write(msg.getBytes());
+                this.send(MsgTypes.SYSTEM, "Login error");
             }
+            this.isLoggedIn = true;
         }
     }
 
-    private void handleLogoff() throws IOException {
+    private void handleLogout() throws IOException {
         server.getWorkersList().remove(this);
-        String exitMsg = login + " is went offline" + System.lineSeparator();
         //send all users current user's login message
         for (ServerWorker worker : server.getWorkersList()) {
-            worker.send(exitMsg);
+            worker.send(MsgTypes.SYSTEM, this.login + " went offline");
         }
+        this.isLoggedIn = false;
         clientSocket.close();
     }
 
-    private void send(String msg) throws IOException {
-        if (login != null)
-            outputStream.write(msg.getBytes());
+    private void handleCommonMessage(String msg) throws IOException {
+        System.out.println("check");
+        if (this.isLoggedIn) {
+            for (ServerWorker worker : server.getWorkersList())
+                if (worker.isLoggedIn())
+                    worker.send(MsgTypes.COMMON, this.login + ": " + msg);
+        } else {
+            this.send(MsgTypes.SYSTEM, "ERROR! You need to log in first!");
+        }
+    }
+
+    private void handleSpecialMessage(String[] tokens) throws IOException {
+        if (tokens.length > 2) {
+            String modifier = tokens[1];
+
+            StringBuilder messageBuilder = new StringBuilder();
+            for (int i = 2; i < tokens.length; i++)
+                messageBuilder.append(tokens[i] + " ");
+
+            String convertedMessage = messageBuilder.toString().trim();
+            boolean isTopic = modifier.trim().charAt(0) == '#';
+            for (ServerWorker worker : server.getWorkersList()) {
+                if (isTopic) {
+                    if (worker.isMemberOfTopic(modifier))
+                        worker.sendToTopic(getLogin(), convertedMessage, modifier);
+                } else {
+                    if (modifier.equalsIgnoreCase(worker.getLogin())) {
+                        worker.send(MsgTypes.DIRECT, "(" + getLogin() + " -> you): " + convertedMessage);
+                        this.send(MsgTypes.DIRECT, "(" + "you" + " -> " + worker.getLogin() + "): " + convertedMessage);
+                    }
+                }
+            }
+        } else
+            this.send(MsgTypes.SYSTEM, "ERROR! Invalid command");
+    }
+
+    private void send(MsgTypes msgType, String msg) throws IOException {
+        switch (msgType) {
+            default:
+                break;
+            case SYSTEM:
+                outputStream.write((SYS_LINE_PREFIX + msg + System.lineSeparator()).getBytes());
+                break;
+            case COMMON:
+                outputStream.write((MSG_LINE_PREFIX + msg + System.lineSeparator()).getBytes());
+                break;
+            case DIRECT:
+                outputStream.write((MSG_LINE_PREFIX + msg + System.lineSeparator()).getBytes());
+                break;
+            case LIST:
+                outputStream.write((LIST_LINE_PREFIX + msg + System.lineSeparator()).getBytes());
+                break;
+        }
+    }
+
+    private void sendToTopic(String fromUser, String msg, String topicName) throws IOException {
+        outputStream.write(("- " + topicName +"|" +  fromUser + ": " + msg + System.lineSeparator()).getBytes());
     }
 }
