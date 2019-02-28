@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.HashSet;
 
 public class Server extends Thread {
     private final int serverPort;
@@ -20,26 +21,26 @@ public class Server extends Thread {
             + "\t quit" + System.lineSeparator() + System.lineSeparator();
 
 
-    private ArrayList<ServerWorker> workersList = new ArrayList<>();
+    private HashSet<ServerWorker> workersList = new HashSet<>();
     private ArrayList<String> topicsList = new ArrayList<>();
 
-    public Server(int serverPort) {
+    Server(int serverPort) {
         this.serverPort = serverPort;
     }
 
-    public ArrayList<ServerWorker> getWorkersList() {
+    HashSet<ServerWorker> getWorkersList() {
         return workersList;
     }
 
-    public ArrayList<String> getTopicsList() {
+    ArrayList<String> getTopicsList() {
         return topicsList;
     }
 
-    public int getCurrentUsers() {
+    int getCurrentUsers() {
         return currentUsers;
     }
 
-    public void setCurrentUsers(int currentUsers) {
+    void setCurrentUsers(int currentUsers) {
         this.currentUsers = currentUsers;
     }
 
@@ -48,9 +49,9 @@ public class Server extends Thread {
         try {
             ServerSocket serverSocket = new ServerSocket(serverPort);
             while (true) {
-                System.out.println("About to accept client connection.." + System.lineSeparator());
+                System.out.println("About to accept client connection");
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("Accepted from " + clientSocket + System.lineSeparator());
+                System.out.println("Accepted from " + clientSocket);
                 showWelcomeMessage(clientSocket);
                 ServerWorker worker = new ServerWorker(this, clientSocket);
                 workersList.add(worker);
@@ -68,6 +69,4 @@ public class Server extends Thread {
             e.printStackTrace();
         }
     }
-
-
 }
