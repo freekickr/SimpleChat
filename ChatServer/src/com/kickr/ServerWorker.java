@@ -5,12 +5,26 @@ import java.net.Socket;
 import java.util.LinkedHashSet;
 
 public class ServerWorker extends Thread {
+
+    private final String welcomeMsg = "Welcome to ChatServer!" + System.lineSeparator() + "Basic commands: " + System.lineSeparator()
+            + "\t login <username> <password> \t(logging in)" + System.lineSeparator()
+            + "\t msg <username> <message> \t(direct messages)" + System.lineSeparator()
+            + "\t msg <#topicname> <message> \t(direct messages)" + System.lineSeparator()
+            + "\t #topics \t\t\t(get the list of all topics)" + System.lineSeparator()
+            + "\t #newtopic <topicname> \t\t(create a new topic, without #)" + System.lineSeparator()
+            + "\t #join <topicname> \t\t(join to topic, with #)" + System.lineSeparator()
+            + "\t #leave <topicname> \t\t(leave this topic, with #)" + System.lineSeparator()
+            + "\t logout" + System.lineSeparator()
+            + "\t quit";
+
     private static final String MSG_LINE_PREFIX = "- ";
     private static final String SYS_LINE_PREFIX = "<=> ";
     private static final String LIST_LINE_PREFIX = " - ";
 
     private final Socket clientSocket;
     private final Server server;
+    private InputStream inputStream;
+    private OutputStream outputStream;
 
     private String login;
     private boolean isLoggedIn = false;
@@ -43,12 +57,16 @@ public class ServerWorker extends Thread {
     }
 
     private void handleClientSocket() throws IOException {
+        inputStream = clientSocket.getInputStream();
+        outputStream = clientSocket.getOutputStream();
+        this.send(MsgTypes.NONE, welcomeMsg);
+
         BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
         String line;
-        while (!clientSocket.isClosed() && reader.ready() && (line = reader.readLine()) != null) {
+        while ((line = reader.readLine()) != null) {
             System.out.println(line);
-            String[] tokens = line.split(" ");
-            if (tokens.length > 0) {
+            if (!"quit".equalsIgnoreCase(line))  {
+                String[] tokens = line.split(" ");
                 String cmd = tokens[0].trim().toLowerCase();
                 switch (cmd) {
                     default:
@@ -87,18 +105,15 @@ public class ServerWorker extends Thread {
                         else
                             this.send(MsgTypes.SYSTEM, "ERROR! You need to log in first!");
                         break;
-                    case "logout":
-                        handleLogout();
-                        clientSocket.close();
-                        break;
-                    case "quit":
-                        handleLogout();
-                        clientSocket.close();
-                        break;
                 }
+            } else {
+                handleQuit();
+                break;
             }
         }
-        reader.close();
+        inputStream.close();
+        outputStream.close();
+        clientSocket.close();
         System.out.println("closing");
     }
 
@@ -132,6 +147,17 @@ public class ServerWorker extends Thread {
         } else {
             this.send(MsgTypes.SYSTEM, "ERROR! Not a valid username/password");
         }
+    }
+
+    private void handleQuit() throws IOException {
+        server.getWorkersList().remove(this);
+        //send all users current user's logout message
+        for (ServerWorker worker : server.getWorkersList())
+            if (!login.equalsIgnoreCase(worker.getLogin()) && worker.getLogin() != null)
+                worker.send(MsgTypes.SYSTEM, this.login + " went offline");
+
+        server.setCurrentUsers(server.getCurrentUsers() - 1);
+        this.isLoggedIn = false;
     }
 
     private void handleGetTopicsList() throws IOException {
@@ -194,18 +220,6 @@ public class ServerWorker extends Thread {
         }
     }
 
-
-    private void handleLogout() throws IOException {
-        server.getWorkersList().remove(this);
-        //send all users current user's logout message
-        /*for (ServerWorker worker : server.getWorkersList())
-            if (!login.equalsIgnoreCase(worker.getLogin()) && worker.getLogin() != null)
-                worker.send(MsgTypes.SYSTEM, this.login + " went offline");*/
-
-        server.setCurrentUsers(server.getCurrentUsers() - 1);
-        this.isLoggedIn = false;
-    }
-
     private void handleCommonMessage(String msg) throws IOException {
         for (ServerWorker worker : server.getWorkersList())
             if (worker.isLoggedIn())
@@ -238,29 +252,34 @@ public class ServerWorker extends Thread {
     }
 
     private void send(MsgTypes msgType, String msg) throws IOException {
-        BufferedWriter buf = new BufferedWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
         switch (msgType) {
             default:
                 break;
+            case NONE:
+                outputStream.write((msg + System.lineSeparator()).getBytes());
+                outputStream.flush();
+                break;
             case SYSTEM:
-                buf.append(SYS_LINE_PREFIX).append(msg).append(System.lineSeparator()).append(System.lineSeparator());
+                outputStream.write((SYS_LINE_PREFIX + msg + System.lineSeparator()).getBytes());
+                outputStream.flush();
                 break;
             case COMMON:
-                buf.append(MSG_LINE_PREFIX).append(msg).append(System.lineSeparator()).append(System.lineSeparator());
+                outputStream.write((MSG_LINE_PREFIX + msg + System.lineSeparator()).getBytes());
+                outputStream.flush();
                 break;
             case DIRECT:
-                buf.append(MSG_LINE_PREFIX).append(msg).append(System.lineSeparator()).append(System.lineSeparator());
+                outputStream.write((MSG_LINE_PREFIX + msg + System.lineSeparator()).getBytes());
+                outputStream.flush();
                 break;
             case LIST:
-                buf.append(LIST_LINE_PREFIX).append(msg).append(System.lineSeparator()).append(System.lineSeparator());
+                outputStream.write((LIST_LINE_PREFIX + msg + System.lineSeparator()).getBytes());
+                outputStream.flush();
                 break;
         }
-        buf.flush();
     }
 
     private void sendToTopic(String fromUser, String msg, String topicName) throws IOException {
-        BufferedWriter buf = new BufferedWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
-        buf.append("- ").append(topicName).append("|").append(fromUser).append(": ").append(msg).append(System.lineSeparator());
-        buf.flush();
+        outputStream.write(("- " + topicName + "|" + fromUser + ": " + msg + System.lineSeparator()).getBytes());
+        outputStream.flush();
     }
 }

@@ -1,5 +1,7 @@
 package com.kickr;
 
+import com.kickr.engine.ResponseListener;
+
 import java.io.*;
 import java.net.Socket;
 import java.util.Scanner;
@@ -8,8 +10,7 @@ public class ChatClient {
     private final String host;
     private final int port;
     private Socket socket;
-    private PrintWriter writerOut;
-    private BufferedReader readerIn;
+    private OutputStream outputStream;
 
     public ChatClient(String serverName, int serverPort) {
         this.host = serverName;
@@ -17,7 +18,9 @@ public class ChatClient {
     }
 
     public static void main(String[] args) throws IOException {
-        ChatClient client = new ChatClient("localhost", 8818);
+        String serverHost = "localhost";
+        int serverPort = 8818;
+        ChatClient client = new ChatClient(serverHost, serverPort);
         client.start();
     }
 
@@ -34,32 +37,29 @@ public class ChatClient {
                 }
                 sendMsg(line);
             }
-
         }
         else
             System.err.println("connection failed");
-
-        writerOut.close();
-        readerIn.close();
+        outputStream.close();
         socket.close();
-    }
-
-
-    private void sendMsg(String line) {
-        writerOut.println(line);
-        writerOut.flush();
     }
 
     private boolean connect() {
         try {
             this.socket = new Socket(host, port);
-            writerOut = new PrintWriter(socket.getOutputStream());
-            readerIn = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             System.out.println("Client port is " + socket.getLocalPort());
+            outputStream = socket.getOutputStream();
+            Thread inputListener = new Thread(new ResponseListener(socket));
+            inputListener.start();
             return true;
         } catch (IOException e) {
             e.printStackTrace();
         }
         return false;
+    }
+
+    private void sendMsg(String line) throws IOException {
+        outputStream.write((line + System.lineSeparator()).getBytes());
+        outputStream.flush();
     }
 }
